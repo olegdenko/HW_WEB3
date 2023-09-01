@@ -1,11 +1,14 @@
-from threading import Thread
+from threading import Thread, Lock
 import logging
 import sys
-import os
 from pathlib import Path
 import uuid
 import shutil
 import re
+from rich import print
+import datetime
+
+lock = Lock()
 
 
 EXCEPTION = ["Audio", "Documents", "Images", "Video", "Archives", "Other"]
@@ -148,7 +151,10 @@ def move_file(file: Path, root_dir: Path, categorie: str) -> None:
     target_dir = root_dir.joinpath(categorie)
     if not target_dir.exists():
         # print(f"Creation {target_dir}") # друкує теку яку сортуємо
-        target_dir.mkdir()
+        try:
+            target_dir.mkdir()
+        except FileExistsError:
+            pass
 
     if file.suffix.lower() in (".zip", ".tar", ".gz"):
         try:
@@ -159,14 +165,16 @@ def move_file(file: Path, root_dir: Path, categorie: str) -> None:
     new_name = target_dir.joinpath(f"{normalize(file.stem)}{file.suffix}")
     if new_name.exists():
         new_name = new_name.with_name(f"{new_name.stem}-{uuid.uuid4()}{file.suffix}")
-    file.rename(new_name)
+    with lock:
+        file.rename(new_name)
     ext.add(file.suffix)
 
-    if categorie in dict_search_result:
-        dict_search_result[categorie][0].append(new_name.name)
-        dict_search_result[categorie][1].update(ext)
-    else:
-        dict_search_result[categorie] = [[new_name.name], ext]
+    with lock:
+        if categorie in dict_search_result:
+            dict_search_result[categorie][0].append(new_name.name)
+            dict_search_result[categorie][1].update(ext)
+        else:
+            dict_search_result[categorie] = [[new_name.name], ext]
 
 
 def get_categories(file: Path) -> str:
@@ -178,50 +186,60 @@ def get_categories(file: Path) -> str:
 
 
 def sort_folder(path: Path) -> None:
+    threads = []
+
+    def create_thread(item, path):
+        cat = get_categories(item)
+        move_f = Thread(target=move_file, args=(item, path, cat))
+        threads.append(move_f)
+
     for item in path.glob("**/*"):
         logging.debug(f'{item}')
-        # print(item)
         if item.is_dir() and item.name in EXCEPTION:
-            return
+            continue
         if item.is_file():
-            cat = get_categories(item)
-            move_file = Thread(target=move_file, args=(item, path, cat))
-            move_file.start()
-            # move_file(item, path, cat)
+            create_thread(item, path)
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()   
 
 
-# def save_log(list):
-#     absolute_path = os.path.abspath(sys.argv[0])
-#     path = Path(sys.path[0]).joinpath("Sort_Log.txt")
-#     with open(path, "w") as file:
-#         file.writelines(str(item) + "\n" for item in list)
+def save_log(list):
+    # absolute_path = os.path.abspath(sys.argv[1])
+    path = Path(sys.path[0]).joinpath("List_of_files.txt")
+    with open(path, "w") as file:
+        file.writelines(str(item) + "\n" for item in list)
 
 
-# =========================================
-def sort_main(argv):
+def main(argv):
     try:
-        path = Path(argv[1])
+        path = Path(argv)
     except IndexError:
         return "No folder specified for sorting"
-
     if not path.exists():
         return f"This {path} does not exist."
-
     sort_folder(path)
     delete_empty_folders(path)
     delete_arch_files(path)
     # file_list()
-    # save_log(file_list())
+    save_log(file_list())
     return f"The folder {path} is sorted - [bold green]success[/bold green]"
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG, handlers=[
-        logging.FileHandler("Sort_Log.txt"),
-        logging.StreamHandler()
-    ], format="%(asctime)s %(threadName)s %(message)s")
+    start_time = datetime.datetime.now()
+    logging.basicConfig(level=logging.INFO, handlers=[
+        logging.FileHandler("Sort_Log.txt")
+        # logging.StreamHandler()
+    ], format="%(asctime)s %(message)s")
     try:
-        print(sort_main())
-    except TypeError:
+        print(main(sys.argv[1]))
+    except IndexError:
         print("Write path!")
-        
+    end_time = datetime.datetime.now()
+    execution_time = end_time - start_time
+    # logging.info(f'The job is done in: {execution_time}sec.')
+    print(f'The job is done in: {execution_time}sec.')
