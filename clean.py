@@ -241,5 +241,5 @@ if __name__ == "__main__":
         print("Write path!")
     end_time = datetime.datetime.now()
     execution_time = end_time - start_time
-    # logging.info(f'The job is done in: {execution_time}sec.')
+    logging.info(f'The job is done in: {execution_time}sec.')
     print(f'The job is done in: {execution_time}sec.')
